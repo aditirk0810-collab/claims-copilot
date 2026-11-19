@@ -40,10 +40,38 @@ All metrics are measured on a labeled gold set (see `eval/`).
 
 ## Data
 
-Real claims contain PII, so development uses:
-- **RVL-CDIP** (public scanned-document dataset) for training the page classifier.
-- **Synthetic claim packets** generated with an LLM and rendered to PDF (claim form, police report, estimate, medical bill, letters) plus public car-damage photos.
-- A **gold set** of ~100 questions with correct answers and page numbers.
+Real claims contain PII, so development uses synthetic packets with exact ground truth (plus **RVL-CDIP**, a public scanned-document dataset, for classifier pre-training later).
+
+### Synthetic claim packet generator (`synth/`)
+
+Each packet is built from one set of claim facts, so every document agrees and every answer is known:
+
+- **Documents:** 2-page loss notice (claim form), police report (~70% of claims), 1-2 repair estimates with line items and tax, itemized medical bill with CPT/ICD-10 codes (injury claims), adjuster email and claimant letter, towing invoice (`other`), and 2-6 **real car damage photos**.
+- **Real photos:** 240 real damage photos (dents, scratches) from the [car-damage-new dataset](https://huggingface.co/datasets/JijoJS/car-damage-new1) by Roboflow user jijo, **CC BY 4.0**. Download the `test` and `valid` zips into `data/raw/car_damage/photos/` (see `SOURCE.md` there). If the folder is missing, the generator falls back to drawn placeholder photos.
+- **Realistic mess:** pages are shuffled, and ~30% of non-photo pages are rendered as **scans** (rasterized, tilted, blurred, noisy JPEG) with no extractable text, so the OCR step is required.
+- **Labels per packet** (`labels.json`): page type, scanned flag, and ground-truth text for every page, plus gold Q&A.
+- **Gold Q&A** (`eval/gold_qa.jsonl`): questions with the exact answer and the **evidence page numbers**. Questions about missing documents (no police report, no medical bill, no tow) have the answer `NOT_IN_PACKET`, to test that the copilot refuses instead of guessing.
+- **Deterministic:** the same seed always produces the same packets.
+
+Current dataset (`--n 50 --seed 42`): **50 packets, 563 pages, 679 gold questions** (616 answerable, 63 not-in-packet), 91 scanned pages.
+
+| Page type | Pages |
+|---|---|
+| photo | 207 |
+| claim_form | 100 |
+| correspondence | 85 |
+| repair_estimate | 84 |
+| police_report | 34 |
+| medical_bill | 27 |
+| other (towing) | 26 |
+
+Classes are imbalanced (like real packets), so the classifier is reported with per-class F1, not only accuracy.
+
+```bash
+python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m synth.generate --n 50 --seed 42   # writes data/synthetic/ and eval/gold_qa.jsonl
+.venv/bin/python -m pytest -q                          # 15 tests: data labels, page reading, scoring
+```
 
 ## Architecture (planned)
 
@@ -60,6 +88,7 @@ PDF packet -> ingest (OCR, per page) -> classify (PyTorch) -> index (chunk + emb
 ## Repo layout
 
 ```
+synth/     synthetic claim packet generator + gold Q&A
 ingest/    PDF -> pages -> text
 classify/  PyTorch page classifier
 index/     chunking, embeddings, vector DB
@@ -72,12 +101,40 @@ tests/     unit tests
 
 ## Roadmap
 
-- [ ] Phase 1: synthetic packet generator + gold set
+- [x] Phase 1: synthetic packet generator + gold set
 - [ ] Phase 2: end-to-end baseline (upload -> classify -> index -> ask -> cited answer)
+  - [x] Step 1: page reading (text copy + Tesseract OCR), scored against ground truth
 - [ ] Phase 3: measure and improve (classifier fine-tuning, vector DB comparison, hybrid search + reranking, RAGAS)
 - [ ] Phase 4: production polish (Docker services, CI eval gate, latency/cost logging, PII masking, Streamlit demo)
 - [ ] Phase 5: results table, architecture diagram, demo video
 
 ## Results
 
-_To be filled in as each phase is measured._
+### Step 1: page reading (`ingest/`)
+
+Each page takes the cheapest route that works:
+
+| Page looks like | Detected by | Method |
+|---|---|---|
+| Has a text layer (20+ words) | `page.get_text("words")` | **copy text** (instant, exact) |
+| One image covering 80%+ of the page, no words | image area / page area | **OCR** with Tesseract 5 (CNN + bi-LSTM + CTC), 300 dpi |
+| Photo with a short caption | image covers < 80% | keep caption, don't OCR |
+
+```bash
+.venv/bin/python -m ingest.run      # writes data/ingested/<claim_id>.jsonl
+.venv/bin/python -m eval.ocr_eval   # scores against labels.json
+```
+
+Results on 50 packets (563 pages), Tesseract 5.5.2:
+
+| Method | Pages | Mean CER | Fact survival* |
+|---|---|---|---|
+| copy text | 265 | 0.00% | 473/473 (100%) |
+| OCR (scans) | 91 | 1.20% | 143/143 (100%) |
+| photo (caption only) | 207 | - | - |
+
+- **Method choice accuracy: 100%** (every page routed to the right method).
+- **Speed:** ~0.8 s per scanned page on a laptop; text pages are instant.
+- *Fact survival = gold answers (amounts, IDs, dates, names) found intact in the page text. It matters more than CER: one wrong digit in an amount means a wrong answer.
+- **Error analysis:** the 1.2% CER is almost all junk characters where Tesseract reads horizontal table rules as text (e.g. `ea ar ea rage`); words and numbers came through intact. Next fixes: remove ruling lines before OCR, and compare against a cloud engine (Azure Document Intelligence / AWS Textract) on harder scans.
+- **Caveat:** these scans are simulated (tilt, blur, noise). Real phone photos and fax scans are harder; the plan for production is a hand-labeled sample of real pages plus confidence-based routing to a human.

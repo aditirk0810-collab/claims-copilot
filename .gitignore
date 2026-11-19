@@ -5,3 +5,4 @@ data/raw/
 data/synthetic/
 *.pdf
 .DS_Store
+data/ingested/
