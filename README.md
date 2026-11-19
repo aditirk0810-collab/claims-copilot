@@ -70,7 +70,7 @@ Classes are imbalanced (like real packets), so the classifier is reported with p
 ```bash
 python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m synth.generate --n 50 --seed 42   # writes data/synthetic/ and eval/gold_qa.jsonl
-.venv/bin/python -m pytest -q                          # 15 tests: data labels, page reading, scoring
+.venv/bin/python -m pytest -q                          # 23 tests: data, page reading, sorter, scoring
 ```
 
 ## Architecture (planned)
@@ -104,6 +104,7 @@ tests/     unit tests
 - [x] Phase 1: synthetic packet generator + gold set
 - [ ] Phase 2: end-to-end baseline (upload -> classify -> index -> ask -> cited answer)
   - [x] Step 1: page reading (text copy + Tesseract OCR), scored against ground truth
+  - [x] Step 2: page sorter (TF-IDF + logistic regression vs. ResNet-18), stress test, real-scan experiment (RVL-CDIP)
 - [ ] Phase 3: measure and improve (classifier fine-tuning, vector DB comparison, hybrid search + reranking, RAGAS)
 - [ ] Phase 4: production polish (Docker services, CI eval gate, latency/cost logging, PII masking, Streamlit demo)
 - [ ] Phase 5: results table, architecture diagram, demo video
@@ -138,3 +139,70 @@ Results on 50 packets (563 pages), Tesseract 5.5.2:
 - *Fact survival = gold answers (amounts, IDs, dates, names) found intact in the page text. It matters more than CER: one wrong digit in an amount means a wrong answer.
 - **Error analysis:** the 1.2% CER is almost all junk characters where Tesseract reads horizontal table rules as text (e.g. `ea ar ea rage`); words and numbers came through intact. Next fixes: remove ruling lines before OCR, and compare against a cloud engine (Azure Document Intelligence / AWS Textract) on harder scans.
 - **Caveat:** these scans are simulated (tilt, blur, noise). Real phone photos and fax scans are harder; the plan for production is a hand-labeled sample of real pages plus confidence-based routing to a human.
+
+### Step 2: page sorter (`classify/`)
+
+Two sorters trained on the same split and scored the same way:
+
+| Sorter | Input | Model |
+|---|---|---|
+| **Text** | page text from `data/ingested/` | TF-IDF (words + 2-word phrases) + logistic regression, class-balanced |
+| **Image** | page rendered as a 224x224 image | **ResNet-18** pretrained on ImageNet, last layer replaced (1000 -> 7 classes), fine-tuned 4 epochs (AdamW, weighted cross-entropy, Apple MPS GPU) |
+
+- **Split by claim, not by page** (35 claims train / 15 test, 402 / 161 pages), so names, amounts and IDs from one claim never leak into the test set.
+- **Metrics:** accuracy, macro-F1 (every class counts equally; photos are 37% of pages, medical bills 5%), confusion matrix, and the share of pages under 80% confidence that would go to a human.
+
+```bash
+.venv/bin/python -m classify.text_baseline   # trains in ~1 s, prints top words per class
+.venv/bin/python -m classify.cnn             # ~25 s on an M-series Mac
+.venv/bin/python -m classify.stress          # robustness test on damaged pages
+```
+
+**Clean test pages (161):** both sorters score **100% accuracy, macro-F1 1.00**, including scanned pages. Top text features are sensible: `patient`, `balance due` -> medical bill; `officer`, `driver` -> police report; `towing`, `amount paid` -> other.
+
+That score shows the pipeline works, not that the models are robust: the synthetic templates are uniform. So the test pages were **damaged on purpose**:
+
+| Text sorter: words kept | Accuracy | Sent to human |
+|---|---|---|
+| 100% | 100.0% | 0.0% |
+| 50% | 97.5% | 39.8% |
+| 20% | 85.7% | 97.5% |
+| 10% | 73.9% | 100.0% |
+
+| Image sorter: blur + shrink | Accuracy | Sent to human |
+|---|---|---|
+| none / light | 100.0% | 0.0% |
+| medium | 100.0% | 25.5% |
+| heavy | 65.8% | 59.6% |
+| extreme | 54.7% | 65.2% |
+
+**What this shows:** the text sorter's confidence drops with its accuracy, so nearly all its mistakes go to a human. The image sorter is **overconfident** under heavy damage: some pages are wrong *and* above 80% confidence.
+
+### Step 2b: adding real scans (RVL-CDIP)
+
+Synthetic pages are too uniform, so the sorters were also tested on **real scanned office documents** from **RVL-CDIP** (Harley et al., ICDAR 2015): 5 of its 16 types, 1,000 pages, mapped to our labels (letter / email / memo -> correspondence, form -> claim_form, invoice -> other). The pages were OCR'd with Tesseract (mean confidence 77.5%, vs ~88% on our simulated scans). Source and license: `data/raw/rvl_cdip/SOURCE.md` (public Legacy Tobacco Document Library, research and education use).
+
+```bash
+.venv/bin/python -m classify.rvl          # OCR the 1,000 RVL pages once (~2 min, 6 workers)
+.venv/bin/python -m classify.experiment   # train A vs B, test on synthetic and real
+```
+
+- **Train A:** synthetic only (402 pages). **Train B:** synthetic + 800 real RVL pages.
+- **Real test set:** 200 RVL pages from RVL's own validation split (never seen in training).
+- **Combined** = average of the text and image sorters' probabilities; when they disagree, confidence drops and the page goes to a human.
+
+| Sorter | Trained on | Synthetic test (161) | **Real test (200)** | Real: sent to human | Real: accuracy when confident |
+|---|---|---|---|---|---|
+| text | synthetic only | 100% | 67.5% | 100% | n/a |
+| image (ResNet-18) | synthetic only | 100% | 53.0% | 65.5% | 66.7% |
+| text | synthetic + real | 100% | 88.0% | 47.5% | 99.0% |
+| image (ResNet-18) | synthetic + real | 100% | 84.0% | 33.5% | 90.2% |
+| **combined** | synthetic + real | **100%** | **88.5%** (macro-F1 0.86) | 46.5% | **99.1%** |
+
+**What this shows:**
+1. **Domain gap.** Models trained only on synthetic pages score 100% on synthetic tests but **53-68% on real scans**. A perfect synthetic score did not mean the model works on real documents.
+2. **Real data closes most of the gap**: +20.5 points (text) and +31 points (image) on real scans, with **no loss** on synthetic pages.
+3. **Safe operating point:** the combined sorter is right on **99.1%** of the pages it is confident about and sends the rest (46.5%) to a human. In production, the 80% threshold would be tuned against the cost of human review.
+4. **Weakest classes:** claim_form vs other (generic RVL forms vs invoices look alike). Known label noise: RVL "form" is a generic office form, not an insurance loss notice.
+
+Next: calibrate the CNN (temperature scaling), tune the confidence threshold, and replace RVL with a small hand-labeled set of real claim pages when available.
