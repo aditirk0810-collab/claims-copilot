@@ -92,12 +92,23 @@ def build_packet(index: int, seed: int, out_dir: Path, scan_rate: float = 0.3,
     claim_dir.mkdir(parents=True, exist_ok=True)
     out.save(claim_dir / "packet.pdf", garbage=3, deflate=True)
 
+    qa = build_qa(claim, fact_pages, rng)
+    # evidence_pages = the official source page(s) of a fact (strict).
+    # answer_pages   = every page where the answer string is printed (lenient): e.g. the vehicle
+    # also appears on the police report, estimate and letter. Short Yes/No answers and the
+    # cross-page comparison question keep their strict pages only.
+    for q in qa:
+        q["answer_pages"] = list(q["evidence_pages"])
+        if q["answerable"] and q["type"] not in ("lowest_estimate", "injury_reported"):
+            q["answer_pages"] = sorted(set(q["evidence_pages"])
+                                       | {p["page"] for p in page_meta if q["answer"] in p["text"]})
+
     labels = {
         "claim_id": claim.claim_id,
         "seed": claim_seed,
         "num_pages": len(page_meta),
         "pages": page_meta,
-        "qa": build_qa(claim, fact_pages, rng),
+        "qa": qa,
     }
     (claim_dir / "labels.json").write_text(json.dumps(labels, indent=2))
     return labels

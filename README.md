@@ -50,7 +50,7 @@ Each packet is built from one set of claim facts, so every document agrees and e
 - **Real photos:** 240 real damage photos (dents, scratches) from the [car-damage-new dataset](https://huggingface.co/datasets/JijoJS/car-damage-new1) by Roboflow user jijo, **CC BY 4.0**. Download the `test` and `valid` zips into `data/raw/car_damage/photos/` (see `SOURCE.md` there). If the folder is missing, the generator falls back to drawn placeholder photos.
 - **Realistic mess:** pages are shuffled, and ~30% of non-photo pages are rendered as **scans** (rasterized, tilted, blurred, noisy JPEG) with no extractable text, so the OCR step is required.
 - **Labels per packet** (`labels.json`): page type, scanned flag, and ground-truth text for every page, plus gold Q&A.
-- **Gold Q&A** (`eval/gold_qa.jsonl`): questions with the exact answer and the **evidence page numbers**. Questions about missing documents (no police report, no medical bill, no tow) have the answer `NOT_IN_PACKET`, to test that the copilot refuses instead of guessing.
+- **Gold Q&A** (`eval/gold_qa.jsonl`): questions with the exact answer and two page keys: `evidence_pages` (the official source page, e.g. the claim form for the policy number) and `answer_pages` (every page where the answer is printed, e.g. the vehicle also appears on the police report and estimate). Questions about missing documents (no police report, no medical bill, no tow) have the answer `NOT_IN_PACKET`, to test that the copilot refuses instead of guessing.
 - **Deterministic:** the same seed always produces the same packets.
 
 Current dataset (`--n 50 --seed 42`): **50 packets, 563 pages, 679 gold questions** (616 answerable, 63 not-in-packet), 91 scanned pages.
@@ -70,7 +70,7 @@ Classes are imbalanced (like real packets), so the classifier is reported with p
 ```bash
 python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m synth.generate --n 50 --seed 42   # writes data/synthetic/ and eval/gold_qa.jsonl
-.venv/bin/python -m pytest -q                          # 23 tests: data, page reading, sorter, scoring
+.venv/bin/python -m pytest -q                          # 30 tests: data, page reading, sorter, search, scoring
 ```
 
 ## Architecture (planned)
@@ -105,6 +105,8 @@ tests/     unit tests
 - [ ] Phase 2: end-to-end baseline (upload -> classify -> index -> ask -> cited answer)
   - [x] Step 1: page reading (text copy + Tesseract OCR), scored against ground truth
   - [x] Step 2: page sorter (TF-IDF + logistic regression vs. ResNet-18), stress test, real-scan experiment (RVL-CDIP)
+  - [x] Step 3: search (chunking, bge-small embeddings, Chroma vs FAISS vs BM25 vs hybrid), scored on 616 questions
+  - [ ] Step 4: answer with citations (LLM over top chunks, "not in packet" refusal)
 - [ ] Phase 3: measure and improve (classifier fine-tuning, vector DB comparison, hybrid search + reranking, RAGAS)
 - [ ] Phase 4: production polish (Docker services, CI eval gate, latency/cost logging, PII masking, Streamlit demo)
 - [ ] Phase 5: results table, architecture diagram, demo video
@@ -206,3 +208,32 @@ Synthetic pages are too uniform, so the sorters were also tested on **real scann
 4. **Weakest classes:** claim_form vs other (generic RVL forms vs invoices look alike). Known label noise: RVL "form" is a generic office form, not an insurance loss notice.
 
 Next: calibrate the CNN (temperature scaling), tune the confidence threshold, and replace RVL with a small hand-labeled set of real claim pages when available.
+
+**Page labels saved:** `python -m classify.label_pages` trains the combined sorter on synthetic training claims + real RVL scans and writes `page_type`, `page_type_conf`, `needs_review` (< 0.8) and `split` into every line of `data/ingested/<claim_id>.jsonl`. On the 15 held-out claims it labels 100% of pages correctly; search uses the label as chunk metadata and citations.
+
+### Step 3: search (`index/`)
+
+```bash
+.venv/bin/python -m index.search --claim CLM-2026-00008 --q "What is the repair estimate total?"
+.venv/bin/python -m eval.retrieval_eval      # all search setups on the 616 answerable gold questions
+```
+
+- **Chunking:** by lines (max ~400 characters, 1-line overlap), so a label and its value ("Estimate total $2,346.78") stay together. Each chunk starts with its page type (`[repair_estimate] ...`) and keeps claim_id and page for filtering and citations. 563 pages -> **989 chunks**.
+- **Embeddings:** `BAAI/bge-small-en-v1.5` (384 dimensions, runs locally, no API key), query prefix as the model recommends, vectors cached.
+- **Claim isolation:** every search is restricted to one claim. Chroma uses a metadata filter (`where claim_id = ...`); FAISS has no metadata filter, so it keeps one small index per claim. Tests check that no store ever returns another claim's pages.
+- **Hybrid:** vector + BM25 keyword results fused with Reciprocal Rank Fusion (combines by rank, since the two score scales differ).
+
+Results on 616 answerable questions across 50 claims:
+
+| Search | hit@1 | recall@5 | recall@5 (strict: source page only) | MRR | ms/query |
+|---|---|---|---|---|---|
+| BM25 keyword | 77.1% | 100.0% | 88.5% | 0.871 | <0.1 |
+| vector (FAISS) | **92.2%** | 99.7% | **96.6%** | **0.953** | 8.8 |
+| vector (Chroma) | **92.2%** | 99.7% | **96.6%** | **0.953** | 9.8 |
+| hybrid (Chroma + BM25, RRF) | 90.7% | **100.0%** | 93.3% | 0.951 | 10.2 |
+
+- **recall@5 = 100%** for hybrid across all 14 question types, including answers that only exist on **OCR'd scans** (156 questions).
+- **Vector search ranks best** (right page first 92% of the time). Keyword search alone ranks poorly (77%) but never misses entirely; hybrid trades a little ranking for full recall.
+- **FAISS and Chroma return identical results** (same embeddings, exact search at this size); the choice between them is operational (Chroma: metadata filters and persistence; FAISS: speed at scale). Pinecone was not compared (needs a hosted account).
+- **Eval bug found and fixed:** the first run showed 93% recall because the gold set listed only the official source page; the vehicle, date and policy number are also printed on the police report, estimate and letters, so correct results were marked wrong. The gold set now has both keys, and both are reported.
+- **Caveat:** a claim has only ~20 chunks, so top-5 covers a quarter of a claim; hit@1 and MRR are the more telling numbers. Larger, real packets would make retrieval harder.

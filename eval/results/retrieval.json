@@ -1,0 +1,138 @@
+{
+  "BM25 keyword": {
+    "hit@1": 0.7711038961038961,
+    "recall@5": 1,
+    "recall@5_strict": 0.8847402597402597,
+    "mrr": 0.871185064935065,
+    "ms": 0.04426236033136125,
+    "by_type": {
+      "policy_number": 1,
+      "date_of_loss": 1,
+      "vehicle": 1,
+      "claimant_phone": 1,
+      "injury_reported": 1,
+      "adjuster": 1,
+      "ack_date": 1,
+      "police_report_number": 1,
+      "at_fault_driver": 1,
+      "estimate_total": 1,
+      "medical_total": 1,
+      "diagnosis": 1,
+      "lowest_estimate": 1,
+      "tow_amount": 1
+    },
+    "by_method": {
+      "text": [
+        1,
+        460
+      ],
+      "ocr": [
+        1,
+        156
+      ]
+    },
+    "n_misses": 0
+  },
+  "vector (FAISS)": {
+    "hit@1": 0.922077922077922,
+    "recall@5": 0.9967532467532467,
+    "recall@5_strict": 0.9659090909090909,
+    "mrr": 0.9527056277056277,
+    "ms": 8.787042405756084,
+    "by_type": {
+      "policy_number": 1,
+      "date_of_loss": 1,
+      "vehicle": 1,
+      "claimant_phone": 1,
+      "injury_reported": 0.96,
+      "adjuster": 1,
+      "ack_date": 1,
+      "police_report_number": 1,
+      "at_fault_driver": 1,
+      "estimate_total": 1,
+      "medical_total": 1,
+      "diagnosis": 1,
+      "lowest_estimate": 1,
+      "tow_amount": 1
+    },
+    "by_method": {
+      "text": [
+        0.9978260869565218,
+        460
+      ],
+      "ocr": [
+        0.9935897435897436,
+        156
+      ]
+    },
+    "n_misses": 2
+  },
+  "vector (Chroma)": {
+    "hit@1": 0.922077922077922,
+    "recall@5": 0.9967532467532467,
+    "recall@5_strict": 0.9659090909090909,
+    "mrr": 0.9527056277056277,
+    "ms": 9.785910316581562,
+    "by_type": {
+      "policy_number": 1,
+      "date_of_loss": 1,
+      "vehicle": 1,
+      "claimant_phone": 1,
+      "injury_reported": 0.96,
+      "adjuster": 1,
+      "ack_date": 1,
+      "police_report_number": 1,
+      "at_fault_driver": 1,
+      "estimate_total": 1,
+      "medical_total": 1,
+      "diagnosis": 1,
+      "lowest_estimate": 1,
+      "tow_amount": 1
+    },
+    "by_method": {
+      "text": [
+        0.9978260869565218,
+        460
+      ],
+      "ocr": [
+        0.9935897435897436,
+        156
+      ]
+    },
+    "n_misses": 2
+  },
+  "hybrid (Chroma + BM25, RRF)": {
+    "hit@1": 0.9074675324675324,
+    "recall@5": 1,
+    "recall@5_strict": 0.9334415584415584,
+    "mrr": 0.9508928571428571,
+    "ms": 10.159489327941321,
+    "by_type": {
+      "policy_number": 1,
+      "date_of_loss": 1,
+      "vehicle": 1,
+      "claimant_phone": 1,
+      "injury_reported": 1,
+      "adjuster": 1,
+      "ack_date": 1,
+      "police_report_number": 1,
+      "at_fault_driver": 1,
+      "estimate_total": 1,
+      "medical_total": 1,
+      "diagnosis": 1,
+      "lowest_estimate": 1,
+      "tow_amount": 1
+    },
+    "by_method": {
+      "text": [
+        1,
+        460
+      ],
+      "ocr": [
+        1,
+        156
+      ]
+    },
+    "n_misses": 0
+  }
+}

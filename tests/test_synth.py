@@ -54,6 +54,16 @@ def test_single_fact_answers_appear_on_every_cited_page(packets):
                     assert q["answer"] in lab["pages"][p - 1]["text"], (q, p)
 
 
+def test_answer_pages_include_source_pages_and_contain_answer(packets):
+    _, labels = packets
+    for lab in labels:
+        for q in lab["qa"]:
+            assert set(q["evidence_pages"]) <= set(q["answer_pages"])
+            if q["answerable"] and q["type"] not in ("lowest_estimate", "injury_reported"):
+                for p in q["answer_pages"]:
+                    assert q["answer"] in lab["pages"][p - 1]["text"]
+
+
 def test_unanswerable_questions_have_no_source_document(packets):
     _, labels = packets
     missing_doc = {"police_report_number": "police_report", "medical_total": "medical_bill", "tow_amount": "other"}

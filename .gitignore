@@ -9,3 +9,4 @@ data/ingested/
 models/
 data/page_images/
 data/rvl_ocr.jsonl
+data/index/
