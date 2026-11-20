@@ -1,0 +1,20 @@
+{"question": "What is the plate number of the insured vehicle?", "route": "quick"}
+{"question": "Which clinic billed the claimant?", "route": "quick"}
+{"question": "What time did the accident happen?", "route": "quick"}
+{"question": "Who was driving the other vehicle?", "route": "quick"}
+{"question": "What citation did the officer issue?", "route": "quick"}
+{"question": "What's the account number on the medical bill?", "route": "quick"}
+{"question": "What is the labor rate on the estimate?", "route": "quick"}
+{"question": "Which towing company picked up the car?", "route": "quick"}
+{"question": "What is the insurer's claim number?", "route": "quick"}
+{"question": "What street did the crash happen on?", "route": "quick"}
+{"question": "Combined, how much are the medical and towing charges?", "route": "deep"}
+{"question": "Is the treatment date before or after the accident date?", "route": "deep"}
+{"question": "Do both estimates list the same vehicle?", "route": "deep"}
+{"question": "Was our insured responsible for the crash according to the police?", "route": "deep"}
+{"question": "Should anything in this claim be flagged for the special investigations unit?", "route": "deep"}
+{"question": "What is the difference between the two estimates?", "route": "deep"}
+{"question": "How soon after the loss did the adjuster respond?", "route": "deep"}
+{"question": "Is the date on the police report the same as on the loss notice?", "route": "deep"}
+{"question": "Give me a cost breakdown for the entire claim.", "route": "deep"}
+{"question": "Does the claim form's injury answer contradict the bills?", "route": "deep"}

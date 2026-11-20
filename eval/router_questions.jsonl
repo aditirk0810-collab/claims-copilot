@@ -1,0 +1,30 @@
+{"question": "What's the claim number on the loss notice?", "route": "quick"}
+{"question": "Which body shop wrote the estimate?", "route": "quick"}
+{"question": "Who is the adjuster on this file?", "route": "quick"}
+{"question": "What car was in the accident?", "route": "quick"}
+{"question": "What's the VIN?", "route": "quick"}
+{"question": "On what date did the loss occur?", "route": "quick"}
+{"question": "Which officer wrote the police report?", "route": "quick"}
+{"question": "Give me the police report number.", "route": "quick"}
+{"question": "What did the medical bill charge in total?", "route": "quick"}
+{"question": "What's the claimant's email address?", "route": "quick"}
+{"question": "Where did the accident happen?", "route": "quick"}
+{"question": "What diagnosis is listed on the medical statement?", "route": "quick"}
+{"question": "How much was paid to the tow company?", "route": "quick"}
+{"question": "What is the estimate number from the repair shop?", "route": "quick"}
+{"question": "Did the insured say anyone was hurt?", "route": "quick"}
+{"question": "Add the repair estimate and the tow bill. What do we owe?", "route": "deep"}
+{"question": "How long did the claimant wait before seeing a doctor?", "route": "deep"}
+{"question": "Is the car on the estimate the same one listed on the loss notice?", "route": "deep"}
+{"question": "Does the police report date line up with the claim form?", "route": "deep"}
+{"question": "Which shop is cheaper and by how much?", "route": "deep"}
+{"question": "Can we pursue subrogation, or was our driver at fault?", "route": "deep"}
+{"question": "Is there anything suspicious in this file?", "route": "deep"}
+{"question": "Were medical services provided before the crash date?", "route": "deep"}
+{"question": "Compare the two repair quotes.", "route": "deep"}
+{"question": "What's our total exposure on this claim?", "route": "deep"}
+{"question": "How many days passed between the accident and our acknowledgement?", "route": "deep"}
+{"question": "Do the injury statements match the medical paperwork?", "route": "deep"}
+{"question": "Summarize all costs in the packet.", "route": "deep"}
+{"question": "Are the documents consistent with each other?", "route": "deep"}
+{"question": "Was the claimant treated on the same day as the accident?", "route": "deep"}

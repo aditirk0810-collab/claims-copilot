@@ -72,7 +72,7 @@ Classes are imbalanced (like real packets), so the classifier is reported with p
 ```bash
 python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m synth.generate --n 50 --seed 42   # writes data/synthetic/ and eval/gold_qa.jsonl
-.venv/bin/python -m pytest -q                          # 52 tests: data, page reading, sorter, search, answers, agent, LangChain, scoring
+.venv/bin/python -m pytest -q                          # 68 tests: data, page reading, sorter, search, answers, agent, LangChain, router, scoring
 ```
 
 ## Architecture (planned)
@@ -111,6 +111,7 @@ tests/     unit tests
   - [x] Step 4: answer with citations (Gemini over top chunks, code-side verification, "not in packet" refusal)
   - [x] Step 5: multi-document agent for deep questions (tools, code-side math, verified citations)
   - [x] LangChain (retriever + LCEL chain) and LangGraph (create_agent) implementation; demo web app
+  - [x] Router: Auto mode picks Quick or Deep (rules + classifier + escalation), 85% on held-out questions
 - [ ] Phase 3: measure and improve (classifier fine-tuning, vector DB comparison, hybrid search + reranking, RAGAS)
 - [ ] Phase 4: production polish (Docker services, CI eval gate, latency/cost logging, PII masking, Streamlit demo)
 - [ ] Phase 5: results table, architecture diagram, demo video
@@ -309,6 +310,28 @@ The same pipeline built from LangChain parts; the web app uses it by default (`C
 - **Deep agent**: `langchain.agents.create_agent` (runs on **LangGraph**) with LangChain `@tool`s (search, read_page, calculate, days_between) and a structured final answer via `ToolStrategy(FinalAnswer)`. The tools record pages opened and numbers computed, and the same verification code runs on the result.
 - **Cost control**: an `InMemoryRateLimiter` for the free tier and a persistent JSONL LLM cache (`BaseCache`), so re-runs use no quota.
 - Tests use fake LangChain chat models (scripted tool calls), so the chain and the LangGraph agent are tested without API calls. Live check: quick answer ($2,346.78, page 10) and the deep date check on claim 5 ("No: 07/18/2026 vs 07/17/2026", 2 verified citations).
+
+### Router: Quick or Deep? (`qa/router.py`)
+
+The web app's default **Auto** mode decides the path for each question, cheapest first and all local (no API calls):
+
+1. **Rules:** keyword patterns for calculations ("add", "exposure", "all costs"), comparisons ("cheaper", "by how much"), consistency ("match", "line up", "same car"), red flags ("suspicious", "fraud"), date math ("how many days", "before the accident") and fault/recovery ("subrogation"). Explainable: "needs a calculation ('add')".
+2. **Classifier:** question embedding (bge-small) + logistic regression trained on the gold questions (single-fact vs multi-document). Used only when no rule fires, and sends a question to Deep only if it is at least 80% sure.
+3. **Escalation safety net:** if a Quick answer says "not in packet" or fails verification, the question is re-run in Deep analysis automatically.
+
+```bash
+.venv/bin/python -m qa.router "What is our total exposure on this claim?"
+.venv/bin/python -m eval.router_eval
+```
+
+Graded on hand-written questions worded differently from the training templates:
+
+| Question set | Rules only | Classifier only | Combined router |
+|---|---|---|---|
+| 30 questions (used to tune the rules) | 100% | 67% | 100% |
+| **20 held-out questions** (written before tuning, never tuned on) | 80% | 60% | **85%** |
+
+On the held-out set, every miss sent a deep question to Quick; no simple question was sent to Deep. The 3 misses had no clear signal word ("responsible for the crash", "flagged for special investigations", "cost breakdown for the entire claim"). The classifier is weak because the training set has only 11 unique deep questions (template wording). Next: an LLM router for questions no rule catches, and more varied training questions.
 
 ### Demo web app (`app/`)
 

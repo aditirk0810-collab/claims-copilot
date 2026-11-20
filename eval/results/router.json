@@ -1,0 +1,36 @@
+{
+  "router_questions": {
+    "rules only": {
+      "accuracy": 1.0,
+      "deep_to_quick": 0,
+      "quick_to_deep": 0
+    },
+    "classifier only": {
+      "accuracy": 0.6666666666666666,
+      "deep_to_quick": 10,
+      "quick_to_deep": 0
+    },
+    "combined router": {
+      "accuracy": 1.0,
+      "deep_to_quick": 0,
+      "quick_to_deep": 0
+    }
+  },
+  "router_holdout": {
+    "rules only": {
+      "accuracy": 0.8,
+      "deep_to_quick": 4,
+      "quick_to_deep": 0
+    },
+    "classifier only": {
+      "accuracy": 0.6,
+      "deep_to_quick": 8,
+      "quick_to_deep": 0
+    },
+    "combined router": {
+      "accuracy": 0.85,
+      "deep_to_quick": 3,
+      "quick_to_deep": 0
+    }
+  }
+}

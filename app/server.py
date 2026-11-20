@@ -188,3 +188,37 @@ def deep(body: Ask) -> dict:
     for c in out["citations"]:
         c["page_type"] = types.get(c.get("page"))
     return out
+
+@lru_cache(maxsize=1)
+def router():
+    from qa.router import Router
+    searcher, _ = engine()
+    return Router(embedder=searcher.embedder)   # reuse the already-loaded embedding model
+
+
+@app.post("/api/smart")
+def smart(body: Ask) -> dict:
+    """Auto mode: the router picks Quick or Deep; an unverified Quick answer escalates to Deep."""
+    from qa.router import route_and_answer
+
+    q = body.question.strip()
+    if not q:
+        raise HTTPException(400, "question is empty")
+    return route_and_answer(q, body.claim_id, router(),
+                            lambda qq, c: _quick_result(qq, c), lambda qq, c: _deep_result(qq, c))
+
+
+class _Wrapped:
+    def __init__(self, d: dict):
+        self.d, self.status = d, d["status"]
+
+    def to_dict(self) -> dict:
+        return self.d
+
+
+def _quick_result(q: str, claim_id: str) -> _Wrapped:
+    return _Wrapped(ask(Ask(claim_id=claim_id, question=q)))
+
+
+def _deep_result(q: str, claim_id: str) -> _Wrapped:
+    return _Wrapped(deep(Ask(claim_id=claim_id, question=q)))
