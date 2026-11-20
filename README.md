@@ -16,7 +16,7 @@ A claim arrives as a **packet**: claim forms, damage photos, police reports, rep
 1. **Ingest:** takes a claim packet (PDF / scanned images) and extracts text per page with OCR, keeping page numbers.
 2. **Classify:** a fine-tuned PyTorch page classifier routes each page to a type: claim form, photo, police report, repair estimate, medical bill, letter/email, other. Low-confidence pages are flagged for a human.
 3. **Index:** chunks and embeds page text into a vector database, filtered by `claim_id` so a search only sees that claim's pages.
-4. **Answer:** a LangChain RAG app answers adjuster questions ("What is the repair estimate?") using only retrieved pages, with the page number cited. If the answer is not in the packet, it says so instead of guessing.
+4. **Answer:** a LangChain RAG chain answers adjuster questions ("What is the repair estimate?") using only retrieved pages, with the page number cited. If the answer is not in the packet, it says so instead of guessing.
 
 ## Success metrics
 
@@ -51,6 +51,8 @@ Each packet is built from one set of claim facts, so every document agrees and e
 - **Realistic mess:** pages are shuffled, and ~30% of non-photo pages are rendered as **scans** (rasterized, tilted, blurred, noisy JPEG) with no extractable text, so the OCR step is required.
 - **Labels per packet** (`labels.json`): page type, scanned flag, and ground-truth text for every page, plus gold Q&A.
 - **Gold Q&A** (`eval/gold_qa.jsonl`): questions with the exact answer and two page keys: `evidence_pages` (the official source page, e.g. the claim form for the policy number) and `answer_pages` (every page where the answer is printed, e.g. the vehicle also appears on the police report and estimate). Questions about missing documents (no police report, no medical bill, no tow) have the answer `NOT_IN_PACKET`, to test that the copilot refuses instead of guessing.
+- **Planted inconsistencies** (26 of 50 claims, one each): police report date differs from the loss notice, loss notice says no injuries but a medical bill is present, a repair estimate lists a different vehicle, or medical treatment is dated before the accident. Injected with a separate random stream, so the other claims are unchanged.
+- **Deep gold questions** (`eval/gold_deep_qa.jsonl`, 405): each needs 2+ documents and often math or a comparison: total cost, estimate gap, days to treatment, days to acknowledgement, was our policyholder at fault, date / injury / vehicle consistency, treatment before the accident, and a full red-flag review.
 - **Deterministic:** the same seed always produces the same packets.
 
 Current dataset (`--n 50 --seed 42`): **50 packets, 563 pages, 679 gold questions** (616 answerable, 63 not-in-packet), 91 scanned pages.
@@ -70,7 +72,7 @@ Classes are imbalanced (like real packets), so the classifier is reported with p
 ```bash
 python3.14 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m synth.generate --n 50 --seed 42   # writes data/synthetic/ and eval/gold_qa.jsonl
-.venv/bin/python -m pytest -q                          # 30 tests: data, page reading, sorter, search, scoring
+.venv/bin/python -m pytest -q                          # 52 tests: data, page reading, sorter, search, answers, agent, LangChain, scoring
 ```
 
 ## Architecture (planned)
@@ -106,7 +108,9 @@ tests/     unit tests
   - [x] Step 1: page reading (text copy + Tesseract OCR), scored against ground truth
   - [x] Step 2: page sorter (TF-IDF + logistic regression vs. ResNet-18), stress test, real-scan experiment (RVL-CDIP)
   - [x] Step 3: search (chunking, bge-small embeddings, Chroma vs FAISS vs BM25 vs hybrid), scored on 616 questions
-  - [ ] Step 4: answer with citations (LLM over top chunks, "not in packet" refusal)
+  - [x] Step 4: answer with citations (Gemini over top chunks, code-side verification, "not in packet" refusal)
+  - [x] Step 5: multi-document agent for deep questions (tools, code-side math, verified citations)
+  - [x] LangChain (retriever + LCEL chain) and LangGraph (create_agent) implementation; demo web app
 - [ ] Phase 3: measure and improve (classifier fine-tuning, vector DB comparison, hybrid search + reranking, RAGAS)
 - [ ] Phase 4: production polish (Docker services, CI eval gate, latency/cost logging, PII masking, Streamlit demo)
 - [ ] Phase 5: results table, architecture diagram, demo video
@@ -237,3 +241,81 @@ Results on 616 answerable questions across 50 claims:
 - **FAISS and Chroma return identical results** (same embeddings, exact search at this size); the choice between them is operational (Chroma: metadata filters and persistence; FAISS: speed at scale). Pinecone was not compared (needs a hosted account).
 - **Eval bug found and fixed:** the first run showed 93% recall because the gold set listed only the official source page; the vehicle, date and policy number are also printed on the police report, estimate and letters, so correct results were marked wrong. The gold set now has both keys, and both are reported.
 - **Caveat:** a claim has only ~20 chunks, so top-5 covers a quarter of a claim; hit@1 and MRR are the more telling numbers. Larger, real packets would make retrieval harder.
+
+### Step 4: answers with citations (`qa/`)
+
+```bash
+cp .env.example .env    # then paste a free Gemini key from aistudio.google.com
+.venv/bin/python -m qa.answer --claim CLM-2026-00008 --q "What is the repair estimate total?"
+.venv/bin/python -m eval.qa_eval              # 15 held-out test claims
+```
+
+1. **Retrieve:** hybrid search, top 5 chunks from this claim only.
+2. **Generate:** Gemini (temperature 0, JSON schema output) answers only from the numbered sources, returning `answer`, an exact `quote`, `source_pages`, or `not_in_packet: true`.
+3. **Verify in code, not in the model:** the cited pages must be among the retrieved pages, the quote must appear on a cited page, and the answer must appear on the cited page (or inside that verified quote). Anything that fails is shown as **needs review**, never as fact.
+4. **Cost control:** every call is cached on disk (re-running the eval is free), calls are rate-limited for the free tier, and 429 errors are retried with backoff.
+
+Unit tests use a fake LLM to prove the checks: a made-up amount, a wrong-page citation, or a citation to a page that was not retrieved all go to review. One test caught a real bug: the first version trusted the model's own quote, so a made-up quote could "prove" a made-up answer.
+
+Model: Gemini 3.5 Flash-Lite (Gemini 3.8 Flash answered correctly but took 76-149 s per call; Flash-Lite takes under 1 s).
+
+### Step 5: deep questions with a multi-document agent (`qa/agent.py`)
+
+Questions like "total cost = cheaper estimate + medical + towing" or "do the loss notice and police report agree on the date?" need several documents and arithmetic. A single search + single answer cannot do that, so an agent works in steps (max 10):
+
+| Tool | What it does |
+|---|---|
+| `search(query, page_type?)` | hybrid search in this claim, optionally one document type (uses the Step 2 page labels) |
+| `read_page(page)` | full page text (whole estimates, tables) |
+| `calculate(expression)` | arithmetic in code (AST-parsed: numbers and + - * / only, no `eval`) |
+| `days_between(start, end)` | date math in code |
+| `final_answer(answer, explanation, citations)` | one exact quote per fact used |
+
+Gemini function calling with mode `ANY` (must call a tool every turn), temperature 0, a table of contents of page types in the first message. **Code verifies the result:** every cited page must have been opened by the agent, every quote must be on its page (excerpts joined by `...` are checked one by one), and every number in the answer must be printed on a cited page or produced by `calculate` / `days_between`. Otherwise: needs review.
+
+```bash
+.venv/bin/python -m qa.agent --claim CLM-2026-00005 --q "Do the loss notice and the police report agree on the date of the accident?"
+.venv/bin/python -m eval.deep_eval     # agent vs. simple copilot, 4 questions per type, balanced answers
+```
+
+Results on 40 deep questions (10 types, 4 each, balanced so planted inconsistencies are included), Gemini 3.5 Flash-Lite:
+
+| System | Correct + verified | Correct (any status) | Needs review | Avg steps | Avg documents cited | Avg latency |
+|---|---|---|---|---|---|---|
+| **Agent** | **77.5%** | **92.5%** | 17.5% | 5.1 | 2.4 | 8.1 s |
+| Simple (1 search + 1 answer) | 25.0% | 52.5% | 35.0% | 1 | 1.1 | ~1 s |
+
+| Question type | Agent | Simple |
+|---|---|---|
+| total cost (3-4 documents + addition) | 100% | 25% |
+| gap between two estimates | 100% | 0% |
+| days accident -> treatment | 100% | 25% |
+| days loss -> acknowledgement | 100% | 75% |
+| dates consistent (loss notice vs police report) | 100% | 25% |
+| same vehicle on every estimate | 100% | 25% |
+| treatment before accident | 100% | 25% |
+| injury answer consistent | 50% | 0% |
+| policyholder at fault | 25% | 50% |
+| full red-flag review | 0% | 0% |
+
+**Error analysis** of the 9 agent misses: 6 were correct answers flagged by an over-strict verifier (quotes joining two excerpts with `...`, page numbers in the answer counted as unbacked numbers); fixed with tests. The real weakness was the open red-flag review: the agent stopped early and said "None found". Fix: an explicit checklist in the instructions (dates, injuries vs medical bills, vehicle on every estimate, treatment date). The re-run of the improved agent stopped at 15/40 when the free tier's 500 requests/day limit was reached; to be completed.
+
+### LangChain / LangGraph implementation (`qa/lc.py`)
+
+The same pipeline built from LangChain parts; the web app uses it by default (`COPILOT_IMPL=native` switches back to the plain Gemini SDK version):
+
+- **`ClaimRetriever`**: a LangChain `BaseRetriever` over the hybrid search, restricted to one claim (and optionally document types); returns `Document`s with page, page type and OCR metadata.
+- **Quick answer**: an LCEL chain, `RunnableParallel(docs=retriever, question=passthrough) | prompt | ChatGoogleGenerativeAI.with_structured_output(Answer)`; the retrieved documents are kept so code can verify the answer.
+- **Deep agent**: `langchain.agents.create_agent` (runs on **LangGraph**) with LangChain `@tool`s (search, read_page, calculate, days_between) and a structured final answer via `ToolStrategy(FinalAnswer)`. The tools record pages opened and numbers computed, and the same verification code runs on the result.
+- **Cost control**: an `InMemoryRateLimiter` for the free tier and a persistent JSONL LLM cache (`BaseCache`), so re-runs use no quota.
+- Tests use fake LangChain chat models (scripted tool calls), so the chain and the LangGraph agent are tested without API calls. Live check: quick answer ($2,346.78, page 10) and the deep date check on claim 5 ("No: 07/18/2026 vs 07/17/2026", 2 verified citations).
+
+### Demo web app (`app/`)
+
+```bash
+.venv/bin/python -m uvicorn app.server:app --port 8765    # then open http://localhost:8765
+```
+
+Pick a claim, browse its pages (each tagged with the sorter's type and a "scan" badge for OCR'd pages), and ask a question. The answer card shows the value, the cited page, the exact quote and the three verification checks; the cited page opens with the quote **highlighted**: on text pages via the PDF text layer, on scanned pages via Tesseract word boxes. A "What the model was given" panel lists the 5 retrieved chunks. The search engine loads at startup, so answers take about a second with Gemini 3.5 Flash-Lite.
+
+**Model choice:** Gemini 3.8 Flash took 76-149 s per answer (long internal reasoning); 3.5 Flash-Lite answered the same questions correctly in under 1 s. For extracting values from retrieved text, the small fast model is the right tool.

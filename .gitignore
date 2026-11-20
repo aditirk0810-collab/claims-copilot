@@ -10,3 +10,5 @@ models/
 data/page_images/
 data/rvl_ocr.jsonl
 data/index/
+data/llm_cache.jsonl
+data/lc_cache.jsonl

@@ -164,8 +164,8 @@ def claim_form(cl: Claim) -> list[RenderedPage]:
         f"{'had to be towed from the scene' if cl.towing else 'was driven home after the accident'}."
     )
     p.section("Injuries")
-    p.kv("Injuries reported", "Yes" if cl.injury else "No")
-    if cl.injury:
+    p.kv("Injuries reported", cl.injury_on_form)
+    if cl.injury_on_form == "Yes":
         p.para("I felt neck and back pain after the collision and went for medical treatment.")
     p.section("Certification")
     p.para("I certify that the information on this notice is true and complete to the best of my knowledge. "
@@ -174,7 +174,7 @@ def claim_form(cl: Claim) -> list[RenderedPage]:
     p.kv("Date signed", _d(cl.date_of_loss))
     p.kv("Page", "2 of 2")
     page2 = RenderedPage(f"{cl.claim_id}/claim_form", "claim_form", p.bytes(), {
-        "injury_reported": "Yes" if cl.injury else "No",
+        "injury_reported": cl.injury_on_form,
     })
     return [page1, page2]
 
@@ -185,7 +185,7 @@ def police_report(cl: Claim) -> list[RenderedPage]:
         return []
     p = Page()
     p.banner("Motor Vehicle Accident Report", pr.department.upper(), "Records Division")
-    p.kv2(("Report number", pr.report_no), ("Date", _d(cl.date_of_loss)))
+    p.kv2(("Report number", pr.report_no), ("Date", _d(cl.police_date)))
     p.kv2(("Time", cl.time_of_loss), ("Location", cl.loss_location))
     p.kv2(("Reporting officer", pr.officer), ("Badge", pr.badge))
     p.section("Vehicle 1")
@@ -204,7 +204,8 @@ def police_report(cl: Claim) -> list[RenderedPage]:
     return [RenderedPage(f"{cl.claim_id}/police_report", "police_report", p.bytes(), {
         "police_report_number": pr.report_no,
         "at_fault_driver": pr.at_fault,
-        "date_of_loss": _d(cl.date_of_loss),
+        "police_date": _d(cl.police_date),
+        **({"date_of_loss": _d(cl.date_of_loss)} if pr.report_date is None else {}),
     })]
 
 
@@ -215,7 +216,7 @@ def repair_estimates(cl: Claim) -> list[RenderedPage]:
         p.banner("Repair Estimate", e.shop, f"{e.address} | {e.phone}")
         p.kv2(("Estimate number", e.estimate_no), ("Estimate date", _d(e.date)))
         p.kv2(("Customer", cl.claimant.name), ("Insurer claim", cl.claim_id))
-        p.kv2(("Vehicle", cl.vehicle.label), ("VIN", cl.vehicle.vin))
+        p.kv2(("Vehicle", e.vehicle_label or cl.vehicle.label), ("VIN", cl.vehicle.vin))
         p.section("Parts and operations")
         p.table(["#", "Description", "Amount"],
                 [[str(n), d, money(a)] for n, (d, a) in enumerate(e.lines, 1)],
@@ -232,6 +233,7 @@ def repair_estimates(cl: Claim) -> list[RenderedPage]:
         out.append(RenderedPage(f"{cl.claim_id}/estimate_{i + 1}", "repair_estimate", p.bytes(), {
             f"estimate_total:{i}": money(e.total),
             f"estimate_shop:{i}": e.shop,
+            f"estimate_vehicle:{i}": e.vehicle_label or cl.vehicle.label,
         }))
     return out
 
@@ -257,6 +259,7 @@ def medical_bill(cl: Claim) -> list[RenderedPage]:
     return [RenderedPage(f"{cl.claim_id}/medical_bill", "medical_bill", p.bytes(), {
         "medical_total": money(m.total),
         "diagnosis": m.icd[1],
+        "date_of_service": _d(m.date_of_service),
     })]
 
 

@@ -109,6 +109,7 @@ class Estimate:
     lines: list[tuple[str, float]]
     labor_hours: float
     labor_rate: float
+    vehicle_label: str | None = None   # set only by an injected inconsistency
 
     @property
     def labor(self) -> float:
@@ -151,6 +152,7 @@ class PoliceReport:
     other_vehicle: Vehicle
     at_fault: str
     citation: str
+    report_date: date | None = None    # set only by an injected inconsistency
 
 
 @dataclass
@@ -181,6 +183,16 @@ class Claim:
     estimates: list[Estimate] = field(default_factory=list)
     medical: MedicalBill | None = None
     towing: Towing | None = None
+    form_injury: str | None = None     # what the loss notice says, if it disagrees with reality
+    anomalies: list[str] = field(default_factory=list)
+
+    @property
+    def injury_on_form(self) -> str:
+        return self.form_injury or ("Yes" if self.injury else "No")
+
+    @property
+    def police_date(self) -> date | None:
+        return None if self.police is None else (self.police.report_date or self.date_of_loss)
 
     @property
     def loss_location(self) -> str:
@@ -303,3 +315,39 @@ def build_claim(index: int, rng: random.Random, fake: Faker) -> Claim:
         medical=medical,
         towing=towing,
     )
+
+
+ANOMALY_TYPES = ["police_date_mismatch", "injury_mismatch", "vehicle_mismatch", "treatment_before_loss"]
+
+
+def inject_anomalies(cl: Claim, rng: random.Random, rate: float = 0.35) -> Claim:
+    """Plant at most one realistic inconsistency in ~35% of claims, for deep-question tests.
+
+    Uses its own `rng` so claims without an anomaly render exactly as before.
+      police_date_mismatch   police report date differs from the loss notice by 1-3 days
+      injury_mismatch        loss notice says "No" injuries, but a medical bill is in the packet
+      vehicle_mismatch       one repair estimate lists a different vehicle than the loss notice
+      treatment_before_loss  medical date of service is BEFORE the accident (possible fraud flag)
+    """
+    if rng.random() >= rate:
+        return cl
+    options = []
+    if cl.police:
+        options.append("police_date_mismatch")
+    if cl.medical:
+        options += ["injury_mismatch", "treatment_before_loss"]
+    if cl.estimates:
+        options.append("vehicle_mismatch")
+    kind = rng.choice(options)
+    if kind == "police_date_mismatch":
+        cl.police.report_date = cl.date_of_loss + timedelta(days=rng.choice([-3, -2, -1, 1, 2, 3]))
+    elif kind == "injury_mismatch":
+        cl.form_injury = "No"
+    elif kind == "treatment_before_loss":
+        cl.medical.date_of_service = cl.date_of_loss - timedelta(days=rng.randint(1, 4))
+    elif kind == "vehicle_mismatch":
+        make, model = rng.choice([v for v in VEHICLES if v != (cl.vehicle.make, cl.vehicle.model)])
+        i = rng.randrange(len(cl.estimates))
+        cl.estimates[i].vehicle_label = f"{cl.vehicle.year} {make} {model}"
+    cl.anomalies.append(kind)
+    return cl

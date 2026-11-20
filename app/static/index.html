@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claims Intake Copilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e4e2da;
+  --accent: #1f5f8b; --accent-soft: #e5eff7; --ok: #2f7d4f; --ok-soft: #e4f2ea;
+  --warn: #9a6400; --warn-soft: #fbf0d9; --neutral-soft: #efeee9; --hl: #ffd34d;
+  --radius: 12px; --shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141413; --panel: #1e1e1c; --ink: #ecebe6; --muted: #a09f98; --line: #2f2f2c;
+    --accent: #7fb6dd; --accent-soft: #1c2b36; --ok: #7cc79b; --ok-soft: #18291f;
+    --warn: #e7b65a; --warn-soft: #2e2512; --neutral-soft: #262624;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141413; --panel: #1e1e1c; --ink: #ecebe6; --muted: #a09f98; --line: #2f2f2c;
+  --accent: #7fb6dd; --accent-soft: #1c2b36; --ok: #7cc79b; --ok-soft: #18291f;
+  --warn: #e7b65a; --warn-soft: #2e2512; --neutral-soft: #262624;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 Inter, system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 14px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+header .tag { font-size: 12px; color: var(--muted); }
+header select { margin-left: auto; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); max-width: 60vw; }
+main { display: grid; grid-template-columns: minmax(340px, 460px) 1fr; gap: 20px; padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; }
+form { display: flex; gap: 8px; }
+input[type=text] { flex: 1; font: inherit; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: 0; }
+input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+button { font: inherit; font-weight: 500; border: 0; border-radius: 9px; padding: 10px 16px; background: var(--accent); color: #fff; cursor: pointer; }
+button:disabled { opacity: .55; cursor: wait; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip { font-size: 12.5px; padding: 5px 10px; border-radius: 999px; background: var(--neutral-soft); color: var(--ink); border: 1px solid var(--line); cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.err { color: #c0392b; font-size: 13px; margin-top: 6px; min-height: 1em; }
+.answer .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; }
+.s-answered { background: var(--ok-soft); color: var(--ok); }
+.s-not_in_packet { background: var(--neutral-soft); color: var(--muted); }
+.s-needs_review { background: var(--warn-soft); color: var(--warn); }
+.answer .value { font-size: 28px; font-weight: 600; letter-spacing: -.02em; margin: 12px 0 4px; word-break: break-word; }
+.answer .quote { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13px; background: var(--bg); border-left: 3px solid var(--hl); padding: 8px 10px; margin: 10px 0; border-radius: 0; }
+.cite { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.cite button { background: var(--accent-soft); color: var(--accent); padding: 5px 10px; font-size: 13px; }
+.checks { list-style: none; padding: 0; margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+.checks li::before { content: "✓ "; color: var(--ok); font-weight: 600; }
+.checks li.no::before { content: "✗ "; color: var(--warn); }
+.meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.src { font-size: 12.5px; padding: 8px 0; border-top: 1px solid var(--line); }
+.src b { font-weight: 600; }
+.viewer { position: sticky; top: 78px; }
+.viewer .big { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; display: block; }
+.viewer .caption { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); margin-bottom: 10px; gap: 8px; flex-wrap: wrap; }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
+.thumb { cursor: pointer; border: 2px solid transparent; border-radius: 8px; padding: 4px; background: var(--bg); }
+.thumb.active { border-color: var(--accent); }
+.thumb.cited { border-color: var(--hl); }
+.thumb img { width: 100%; aspect-ratio: 612/792; object-fit: cover; border-radius: 4px; display: block; background: #fff; }
+.thumb .lbl { font-size: 11px; margin-top: 4px; display: flex; justify-content: space-between; gap: 4px; color: var(--muted); }
+.type { font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.scan { font-size: 10.5px; color: var(--warn); }
+.empty { color: var(--muted); font-size: 14px; }
+.modes { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
+.modes button { background: transparent; color: var(--muted); padding: 6px 12px; font-size: 13px; border-radius: 7px; }
+.modes button.on { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); border: 1px solid var(--line); }
+.hint { font-size: 12.5px; color: var(--muted); margin: -4px 0 10px; }
+.explain { font-size: 14px; margin: 8px 0; }
+.cites { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.citeRow { display: flex; gap: 10px; align-items: flex-start; }
+.citeRow button { background: var(--accent-soft); color: var(--accent); padding: 4px 9px; font-size: 12.5px; white-space: nowrap; }
+.citeRow .q { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12.5px; border-left: 3px solid var(--hl); padding: 3px 8px; background: var(--bg); }
+.trace { list-style: none; counter-reset: s; padding: 0; margin: 8px 0 0; }
+.trace li { counter-increment: s; font-size: 13px; padding: 6px 0 6px 30px; position: relative; border-top: 1px solid var(--line); }
+.trace li::before { content: counter(s); position: absolute; left: 0; top: 6px; width: 20px; height: 20px; border-radius: 50%; background: var(--neutral-soft); color: var(--muted); font-size: 11px; display: grid; place-items: center; }
+.trace .tool { font-weight: 600; }
+.trace .res { color: var(--muted); }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 860px) {
+  main { grid-template-columns: 1fr; padding: 16px; }
+  header { padding: 12px 16px; flex-wrap: wrap; }
+  header select { margin-left: 0; width: 100%; max-width: none; }
+  .viewer { position: static; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Claims Intake Copilot</h1>
+  <span class="tag">Ask a claim packet anything. Every answer cites its page.</span>
+  <select id="claim" aria-label="Choose a claim"></select>
+</header>
+
+<main>
+  <div class="stack">
+    <section class="card">
+      <h2>Ask about this claim</h2>
+      <div class="modes" role="tablist">
+        <button type="button" id="mQuick" class="on">Quick answer</button>
+        <button type="button" id="mDeep">Deep analysis</button>
+      </div>
+      <p class="hint" id="hint">One search, one answer, one cited page. Best for single facts.</p>
+      <form id="ask">
+        <input id="q" type="text" placeholder="e.g. What is the repair estimate total?" autocomplete="off">
+        <button id="go" type="submit">Ask</button>
+      </form>
+      <div id="err" class="err" role="alert"></div>
+      <div class="chips" id="chips"></div>
+    </section>
+
+    <section class="card answer" id="answer">
+      <h2>Answer</h2>
+      <p class="empty">Pick a question above. The copilot searches only this claim's pages, answers from them, and checks that the quote is really on the cited page.</p>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card viewer">
+      <div class="caption"><span id="cap">Page 1</span><span id="capType"></span></div>
+      <img id="big" class="big" alt="Selected page of the claim packet">
+    </section>
+    <section class="card">
+      <h2>Packet pages <span id="count" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="thumbs" id="thumbs"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const TYPE_NAMES = { claim_form: "Claim form", police_report: "Police report", repair_estimate: "Repair estimate",
+  medical_bill: "Medical bill", correspondence: "Letter / email", photo: "Photo", other: "Other" };
+const DEEP = ["What is the total known cost of this claim, using the lower repair estimate plus any medical bills and towing?",
+  "How many days after the accident did the claimant receive medical treatment?",
+  "According to the police report, was our policyholder the at-fault driver?",
+  "Do the loss notice and the police report agree on the date of the accident?",
+  "Is the injury answer on the loss notice consistent with the medical documents in this packet?",
+  "Does every repair estimate list the same vehicle as the loss notice?",
+  "Review the whole packet. List any inconsistencies between the documents, or say there are none."];
+let mode = "quick";
+const SUGGESTED = ["What is the repair estimate total?", "Who was at fault according to the police report?",
+  "What is the total medical bill amount?", "How much was the towing charge?", "What is the policy number?",
+  "When did the accident happen?", "Did the claimant report any injuries?"];
+let state = { claim: null, pages: [], current: 1, cited: [], quotes: {} };
+
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function imgUrl(n, hl, dpi) {
+  const p = new URLSearchParams({ dpi: dpi || 80, v: 2 });
+  if (hl) p.set("hl", hl);
+  return `/api/claims/${state.claim}/page/${n}?${p}`;
+}
+
+async function loadClaims() {
+  const claims = await (await fetch("/api/claims")).json();
+  $("claim").innerHTML = claims.map(c =>
+    `<option value="${c.claim_id}">${c.claim_id} · ${c.pages} pages · ${c.scanned} scanned${c.split === "test" ? " · held-out" : ""}</option>`).join("");
+  const start = claims.find(c => c.claim_id === "CLM-2026-00008") || claims[0];
+  $("claim").value = start.claim_id;
+  await selectClaim(start.claim_id);
+}
+
+async function selectClaim(id) {
+  state = { claim: id, pages: [], current: 1, cited: [], quotes: {} };
+  const data = await (await fetch(`/api/claims/${id}`)).json();
+  state.pages = data.pages;
+  $("count").textContent = `· ${data.pages.length}`;
+  renderThumbs();
+  showPage(1);
+  $("answer").innerHTML = `<h2>Answer</h2><p class="empty">Ask a question about ${esc(id)}.</p>`;
+}
+
+function renderThumbs() {
+  $("thumbs").innerHTML = state.pages.map(p => `
+    <div class="thumb ${p.page === state.current ? "active" : ""} ${state.cited.includes(p.page) ? "cited" : ""}"
+         data-page="${p.page}" title="Page ${p.page}: ${esc(TYPE_NAMES[p.page_type] || p.page_type)}">
+      <img loading="lazy" src="${imgUrl(p.page, "", 30)}" alt="Page ${p.page} thumbnail">
+      <div class="lbl"><span>p${p.page}${p.method === "ocr" ? ' <span class="scan">scan</span>' : ""}</span>
+        <span class="type">${esc(TYPE_NAMES[p.page_type] || p.page_type)}</span></div>
+    </div>`).join("");
+}
+
+function showPage(n) {
+  state.current = n;
+  const p = state.pages.find(x => x.page === n) || {};
+  const hl = state.quotes[n] || "";
+  $("big").src = imgUrl(n, hl, 100);
+  $("cap").textContent = `Page ${n} of ${state.pages.length}` + (p.method === "ocr" ? " · scanned (read with OCR)" : "");
+  const conf = p.page_type_conf ? ` · ${(p.page_type_conf * 100).toFixed(0)}% sure` : "";
+  $("capType").innerHTML = `<span class="type">${esc(TYPE_NAMES[p.page_type] || p.page_type || "")}</span><span style="margin-left:6px">${conf}</span>`;
+  renderThumbs();
+}
+
+$("thumbs").addEventListener("click", (e) => {
+  const t = e.target.closest(".thumb");
+  if (t) showPage(+t.dataset.page);
+});
+$("claim").addEventListener("change", (e) => selectClaim(e.target.value));
+function renderChips() {
+  $("chips").innerHTML = (mode === "deep" ? DEEP : SUGGESTED).map(s => `<span class="chip" role="button" tabindex="0">${esc(s)}</span>`).join("");
+}
+function setMode(m) {
+  mode = m;
+  $("mQuick").classList.toggle("on", m === "quick");
+  $("mDeep").classList.toggle("on", m === "deep");
+  $("hint").textContent = m === "deep"
+    ? "An agent plans, searches several documents, calculates with code, and cites every fact. Takes 5-15 s."
+    : "One search, one answer, one cited page. Best for single facts.";
+  renderChips();
+}
+$("mQuick").addEventListener("click", () => setMode("quick"));
+$("mDeep").addEventListener("click", () => setMode("deep"));
+renderChips();
+$("chips").addEventListener("click", (e) => {
+  const c = e.target.closest(".chip");
+  if (c) { $("q").value = c.textContent; ask(); }
+});
+$("q").addEventListener("input", () => { $("err").textContent = ""; });
+$("ask").addEventListener("submit", (e) => { e.preventDefault(); ask(); });
+
+async function ask() {
+  const q = $("q").value.trim();
+  if (!q) { $("err").textContent = "Type a question first."; $("q").focus(); return; }
+  $("err").textContent = "";
+  $("go").disabled = true;
+  $("answer").innerHTML = `<h2>Answer</h2><p class="empty"><span class="spinner"></span> ${mode === "deep"
+    ? "The agent is working through the documents…" : `Searching ${esc(state.claim)} and asking Gemini…`}</p>`;
+  try {
+    const res = await fetch(mode === "deep" ? "/api/deep" : "/api/ask", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ claim_id: state.claim, question: q }) });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    const data = await res.json();
+    mode === "deep" ? renderDeep(data) : renderAnswer(data);
+  } catch (err) {
+    $("answer").innerHTML = `<h2>Answer</h2><p class="err">Something went wrong: ${esc(err.message)}</p>`;
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+function renderAnswer(r) {
+  state.cited = r.status === "answered" || r.status === "needs_review" ? r.source_pages : [];
+  state.quotes = {};
+  state.cited.forEach(p => { state.quotes[p] = r.quote || ""; });
+  const label = { answered: "Verified answer", not_in_packet: "Not in this packet", needs_review: "Needs human review" }[r.status];
+  const checkNames = { cited_pages_retrieved: "Cited page was among the retrieved pages",
+    quote_on_cited_page: "Quote appears on the cited page", answer_on_cited_page: "Answer appears on the cited page" };
+  let body = "";
+  if (r.status === "not_in_packet") {
+    body = `<div class="value" style="font-size:20px">No answer in this claim's documents</div>
+      <p class="empty">The copilot refuses instead of guessing.</p>`;
+  } else {
+    body = `<div class="value">${esc(r.answer)}</div>
+      <div class="cite">${r.source_pages.map(p => `<button type="button" data-page="${p}">Page ${p} · ${esc(TYPE_NAMES[(state.pages.find(x => x.page === p) || {}).page_type] || "")}</button>`).join("")}</div>
+      ${r.quote ? `<div class="quote">“${esc(r.quote)}”</div>` : ""}
+      <ul class="checks">${Object.entries(r.checks).map(([k, v]) => `<li class="${v ? "" : "no"}">${checkNames[k] || k}</li>`).join("")}</ul>`;
+  }
+  const sources = (r.sources || []).map(s => `<div class="src"><b>Page ${s.page}</b> · ${esc(TYPE_NAMES[s.page_type] || s.page_type)}${s.method === "ocr" ? " · OCR" : ""}<br>${esc(s.text.slice(0, 220))}${s.text.length > 220 ? "…" : ""}</div>`).join("");
+  $("answer").innerHTML = `<h2>Answer</h2>
+    <span class="status s-${r.status}">${label}</span>
+    ${body}
+    <div class="meta">${esc(r.info.model || "")} · ${r.info.cached ? "cached" : (r.info.latency_ms + " ms")} · searched pages ${r.retrieved_pages.join(", ")}</div>
+    <details><summary>What the model was given (top 5 chunks)</summary>${sources}</details>`;
+  $("answer").querySelectorAll(".cite button").forEach(b => b.addEventListener("click", () => showPage(+b.dataset.page)));
+  if (state.cited.length) showPage(state.cited[0]); else renderThumbs();
+}
+
+function describeStep(s) {
+  const a = s.args || {}, r = s.result || {};
+  if (s.tool === "search") {
+    const pages = (r.results || []).map(x => x.page);
+    return `<span class="tool">Searched</span> ${a.page_type ? esc(TYPE_NAMES[a.page_type] || a.page_type) + " pages" : "all pages"} for “${esc(a.query)}” <span class="res">→ pages ${[...new Set(pages)].join(", ") || "none"}</span>`;
+  }
+  if (s.tool === "read_page") return `<span class="tool">Read page ${esc(a.page)}</span> <span class="res">${esc(TYPE_NAMES[r.page_type] || r.page_type || r.error || "")}</span>`;
+  if (s.tool === "calculate") return `<span class="tool">Calculated</span> ${esc(a.expression)} <span class="res">= ${esc(r.result ?? r.error)}</span>`;
+  if (s.tool === "days_between") return `<span class="tool">Counted days</span> ${esc(a.start_date)} → ${esc(a.end_date)} <span class="res">= ${esc(r.days ?? r.error)}</span>`;
+  if (s.tool === "final_answer") return `<span class="tool">Answered</span>`;
+  return esc(s.tool);
+}
+
+function renderDeep(r) {
+  state.cited = [...new Set((r.citations || []).map(c => c.page))];
+  state.quotes = {};
+  (r.citations || []).forEach(c => { if (!state.quotes[c.page]) state.quotes[c.page] = c.quote; });
+  const label = { answered: "Verified answer", not_in_packet: "Not in this packet", needs_review: "Needs human review" }[r.status];
+  const checkNames = { all_citations_verified: "Every quote appears on its cited page",
+    numbers_grounded: "Every number is from a quote or computed by code" };
+  const checks = Object.entries(r.checks || {}).filter(([k]) => checkNames[k])
+    .map(([k, v]) => `<li class="${v ? "" : "no"}">${checkNames[k]}</li>`).join("");
+  const docs = r.checks && r.checks.documents_cited ? ` · ${r.checks.documents_cited} documents cited` : "";
+  $("answer").innerHTML = `<h2>Answer · deep analysis</h2>
+    <span class="status s-${r.status}">${label}</span>
+    <div class="value">${esc(r.answer || "—")}</div>
+    <p class="explain">${esc(r.explanation)}</p>
+    <div class="cites">${(r.citations || []).map(c => `<div class="citeRow"><button type="button" data-page="${c.page}">Page ${c.page} · ${esc(TYPE_NAMES[c.page_type] || "")}</button><span class="q">“${esc(c.quote)}”</span></div>`).join("")}</div>
+    <ul class="checks">${checks}</ul>
+    <div class="meta">${esc(r.info.model)} · ${r.info.steps} steps · ${(r.info.latency_ms / 1000).toFixed(1)} s${docs}</div>
+    <details open><summary>How the agent worked it out</summary><ol class="trace">${(r.steps || []).map(s => `<li>${describeStep(s)}</li>`).join("")}</ol></details>`;
+  $("answer").querySelectorAll(".citeRow button").forEach(b => b.addEventListener("click", () => showPage(+b.dataset.page)));
+  if (state.cited.length) showPage(state.cited[0]); else renderThumbs();
+}
+
+loadClaims().catch(err => { $("answer").innerHTML = `<p class="err">Could not load claims: ${esc(err.message)}</p>`; });
+</script>
+</body>
+</html>

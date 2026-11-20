@@ -21,7 +21,8 @@ import pymupdf
 from faker import Faker
 from PIL import Image, ImageFilter
 
-from .claim import build_claim
+from .claim import build_claim, inject_anomalies
+from .deep_qa import build_deep_qa
 from .qa import build_qa
 from .render import RenderedPage, render_packet
 
@@ -62,6 +63,9 @@ def build_packet(index: int, seed: int, out_dir: Path, scan_rate: float = 0.3,
     fake.seed_instance(claim_seed)
 
     claim = build_claim(index, rng, fake)
+    # Separate RNGs: planting inconsistencies and phrasing deep questions must not shift the main
+    # random stream, so claims without an anomaly stay byte-for-byte the same.
+    inject_anomalies(claim, random.Random(claim_seed ^ 0xA5A5))
     pages: list[RenderedPage] = render_packet(claim, rng, photo_pool)
     order = list(range(len(pages)))
     rng.shuffle(order)  # real packets arrive in no particular order
@@ -109,6 +113,8 @@ def build_packet(index: int, seed: int, out_dir: Path, scan_rate: float = 0.3,
         "num_pages": len(page_meta),
         "pages": page_meta,
         "qa": qa,
+        "anomalies": claim.anomalies,
+        "deep_qa": build_deep_qa(claim, fact_pages, random.Random(claim_seed + 7)),
     }
     (claim_dir / "labels.json").write_text(json.dumps(labels, indent=2))
     return labels
@@ -121,6 +127,7 @@ def main() -> None:
     ap.add_argument("--scan-rate", type=float, default=0.3, help="share of non-photo pages rendered as scans")
     ap.add_argument("--out", type=Path, default=ROOT / "data" / "synthetic")
     ap.add_argument("--gold", type=Path, default=ROOT / "eval" / "gold_qa.jsonl")
+    ap.add_argument("--deep-gold", type=Path, default=ROOT / "eval" / "gold_deep_qa.jsonl")
     ap.add_argument("--photos", type=Path, default=REAL_PHOTOS,
                     help="folder of real damage photos (falls back to drawn photos if missing)")
     args = ap.parse_args()
@@ -142,6 +149,14 @@ def main() -> None:
         for lab in all_labels:
             for q in lab["qa"]:
                 f.write(json.dumps(q) + "\n")
+
+    with open(args.deep_gold, "w") as f:
+        for lab in all_labels:
+            for q in lab["deep_qa"]:
+                f.write(json.dumps(q) + "\n")
+    n_deep = sum(len(lab["deep_qa"]) for lab in all_labels)
+    n_anom = sum(bool(lab["anomalies"]) for lab in all_labels)
+    print(f"deep questions: {n_deep} | claims with a planted inconsistency: {n_anom}")
 
     n_pages = sum(lab["num_pages"] for lab in all_labels)
     n_q = sum(len(lab["qa"]) for lab in all_labels)

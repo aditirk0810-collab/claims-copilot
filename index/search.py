@@ -55,7 +55,7 @@ class Searcher:
         t0 = time.time()
         vectors = embed_chunks(self.chunks, self.embedder) if persist else self.embedder.docs([c.text for c in self.chunks])
         self.embed_secs = time.time() - t0
-        self.chroma = ChromaStore(INDEX_DIR / "chroma" if persist else None)
+        self.chroma = ChromaStore()   # in-memory; vectors themselves are cached on disk
         self.chroma.add(self.chunks, vectors)
         self.faiss = FaissStore()
         self.faiss.add(self.chunks, vectors)
@@ -63,15 +63,36 @@ class Searcher:
         self.bm25.add(self.chunks)
 
     def search(self, query: str, claim_id: str, mode: str = "hybrid", k: int = 5,
-               store: str = "chroma") -> list[tuple[Chunk, float]]:
+               store: str = "chroma", page_types: list[str] | None = None) -> list[tuple[Chunk, float]]:
+        """Search one claim. `page_types` (from the Step 2 sorter) narrows it to e.g. ["police_report"]."""
+        def keep(results):
+            return [(c, s) for c, s in results if not page_types or c.page_type in page_types]
+
+        depth = 40 if page_types else 20   # look deeper before filtering, so k results remain
         if mode == "keyword":
-            return self.bm25.search_text(query, claim_id, k)
+            return keep(self.bm25.search_text(query, claim_id, depth))[:k]
         qvec = self.embedder.query(query)
         vstore = self.chroma if store == "chroma" else self.faiss
         if mode == "vector":
-            return vstore.search(qvec, claim_id, k)
+            return keep(vstore.search(qvec, claim_id, depth))[:k]
         # hybrid: take a deeper list from each, fuse, keep top k
-        return rrf([vstore.search(qvec, claim_id, 20), self.bm25.search_text(query, claim_id, 20)], top=k)
+        return rrf([keep(vstore.search(qvec, claim_id, depth)),
+                    keep(self.bm25.search_text(query, claim_id, depth))], top=k)
+
+    def page_text(self, claim_id: str, page: int) -> tuple[str, str] | None:
+        """Full text and type of one page (the agent's read_page tool)."""
+        f = INGESTED / f"{claim_id}.jsonl"
+        if not f.exists():
+            return None
+        for row in map(json.loads, f.read_text().splitlines()):
+            if row["page"] == page:
+                return row.get("page_type", "unknown"), " ".join(row["text"].split())
+        return None
+
+    def page_types(self, claim_id: str) -> list[tuple[int, str]]:
+        """(page, type) for every page of a claim: the agent's table of contents."""
+        f = INGESTED / f"{claim_id}.jsonl"
+        return [(r["page"], r.get("page_type", "unknown")) for r in map(json.loads, f.read_text().splitlines())]
 
 
 def main() -> None:

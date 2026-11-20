@@ -39,7 +39,7 @@ def build_qa(cl: Claim, fact_pages: dict[str, list[int]], rng: random.Random) ->
         cl.vehicle.label, ["vehicle"])
     add("claimant_phone", ["What is the claimant's phone number?"], cl.claimant.phone, ["claimant_phone"])
     add("injury_reported", ["Did the claimant report any injuries?", "Were injuries reported on the loss notice?"],
-        "Yes" if cl.injury else "No", ["injury_reported"])
+        cl.injury_on_form, ["injury_reported"])
     add("adjuster", ["Who is the assigned adjuster?"], cl.adjuster, ["adjuster"])
     add("ack_date", ["When did the adjuster acknowledge the claim?"],
         cl.ack_date.strftime("%m/%d/%Y"), ["ack_date"])

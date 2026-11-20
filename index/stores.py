@@ -39,15 +39,17 @@ class Embedder:
 class ChromaStore:
     name = "chroma"
 
-    def __init__(self, path: Path | None = None, collection: str = "claims"):
+    def __init__(self, path: Path | None = None, collection: str | None = None):
+        import uuid
+
         import chromadb
 
+        # In-memory by default, with a unique collection name per instance: two processes
+        # (e.g. the web app and the evaluation) must never reset each other's collection.
+        # Rebuilding takes ~2 s from the cached vectors, so persistence isn't needed.
         self.client = chromadb.PersistentClient(str(path)) if path else chromadb.EphemeralClient()
-        try:
-            self.client.delete_collection(collection)
-        except Exception:
-            pass
-        self.col = self.client.create_collection(collection, metadata={"hnsw:space": "cosine"})
+        name = collection or f"claims_{uuid.uuid4().hex[:8]}"
+        self.col = self.client.create_collection(name, metadata={"hnsw:space": "cosine"})
         self.chunks: dict[str, Chunk] = {}
 
     def add(self, chunks: list[Chunk], vectors: np.ndarray) -> None:
